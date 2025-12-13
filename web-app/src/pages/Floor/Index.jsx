@@ -43,6 +43,8 @@ export default function FloorManagement() {
       const res = await fetch(`${API_BASE}/api/buildings`);
       setBuildings(await res.json());
     } catch (err) {
+      // log the error for debugging and satisfy ESLint
+      console.error(err);
       setError("Failed to load buildings");
     }
   };
@@ -52,6 +54,8 @@ export default function FloorManagement() {
       const res = await fetch(`${API_BASE}/api/floors`);
       setFloors(await res.json());
     } catch (err) {
+      // log the error for debugging and satisfy ESLint
+      console.error(err);
       setError("Failed to load floors");
     }
   };

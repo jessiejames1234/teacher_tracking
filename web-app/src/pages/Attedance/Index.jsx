@@ -14,7 +14,7 @@ export default function AttendanceManagement() {
   const [teachers, setTeachers] = useState([]);
 
   const [loading, setLoading] = useState(false);
-  const [ setError] = useState("");
+  const [error, setError] = useState("");
 
   const [filterDate, setFilterDate] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
@@ -85,37 +85,49 @@ export default function AttendanceManagement() {
   // ==========================================
   useEffect(() => {
     if (!localStorage.getItem("token")) return navigate("/login");
-    init();
+
+    const doInit = async () => {
+      try {
+        setLoading(true);
+
+        // generate this week's attendance
+        await fetch(`${API_BASE}/api/attendance/generate-week`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+
+        // fetch teachers (inline to avoid dependency on external helper)
+        try {
+          const resT = await fetch(`${API_BASE}/api/teachers`);
+          setTeachers(await resT.json());
+        } catch (e) {
+          console.error(e);
+          setError("Failed to load teachers");
+        }
+
+        // fetch records (inline)
+        try {
+          const resR = await fetch(`${API_BASE}/api/attendance`);
+          const data = await resR.json();
+          setRecords(Array.isArray(data) ? data : []);
+        } catch (e) {
+          console.error(e);
+          setError("Failed to load attendance");
+        }
+      } catch (err) {
+        console.error(err);
+        setError("Failed to initialize attendance");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    doInit();
   }, [navigate]);
-
-  const init = async () => {
-    try {
-      setLoading(true);
-
-      // generate this week's attendance
-      await fetch(`${API_BASE}/api/attendance/generate-week`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      await fetchTeachers();
-      await fetchRecords();
-    } catch (err) {
-      setError("Failed to initialize attendance");
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // ==========================================
   // FETCHERS
   // ==========================================
-  const fetchTeachers = async () => {
-    const res = await fetch(`${API_BASE}/api/teachers`);
-    setTeachers(await res.json());
-  };
-
   const buildUrl = (date, status, teacherId) => {
     let url = `${API_BASE}/api/attendance`;
     const params = [];
@@ -201,6 +213,8 @@ const renderTimeWithFlag = (time, flag) => {
   return (
     <div className="container py-3">
       <h2>Teacher Attendance Records</h2>
+
+      {error && <div className="alert alert-danger py-2">{error}</div>}
 
       {/* FILTER BAR */}
       <div className="d-flex flex-wrap gap-3 mb-3">

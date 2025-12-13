@@ -8,6 +8,9 @@
     "scheme": "mobileapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "extra": {
+      "API_BASE": "http://10.0.2.2:3000"
+    },
     "ios": {
       "supportsTablet": true
     },

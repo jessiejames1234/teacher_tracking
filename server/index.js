@@ -212,11 +212,8 @@ app.get('/api/offerings', async (req, res) => {
        JOIN tbl_sections sec ON so.section_id = sec.section_id
        ORDER BY s.subject_code, sec.section_name`
     );
-    const formatted = rows.map((r) => ({
-      offering_id: r.offering_id,
-      label: `${r.subject_code} - ${r.section_name}`,
-    }));
-    res.json(formatted);
+    // Return the full rows so frontend can access subject_code, subject_name, section_name
+    res.json(rows);
   } catch (err) {
     console.error('Error fetching offerings:', err);
     res.status(500).json({ error: 'Failed to fetch offerings' });
