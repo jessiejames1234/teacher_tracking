@@ -885,6 +885,175 @@ app.post('/api/attendance/check-out', async (req, res) => {
 
 
 
+// === ACADEMIC MANAGEMENT ENDPOINTS ===
+
+// Departments
+app.get('/api/departments', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT dept_id, dean_id, dept_name FROM tbl_departments ORDER BY dept_name');
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching departments:', err);
+    res.status(500).json({ error: 'Failed to fetch departments' });
+  }
+});
+
+app.post('/api/departments', async (req, res) => {
+  try {
+    const { dept_name, dean_id } = req.body;
+    if (!dept_name) return res.status(400).json({ error: 'Missing dept_name' });
+    const [result] = await pool.query('INSERT INTO tbl_departments (dept_name, dean_id) VALUES (?, ?)', [dept_name, dean_id || null]);
+    res.status(201).json({ dept_id: result.insertId, dept_name, dean_id: dean_id || null });
+  } catch (err) {
+    console.error('Error creating department:', err);
+    res.status(500).json({ error: 'Failed to create department' });
+  }
+});
+
+// Programs
+app.get('/api/programs', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT p.program_id, p.head_id, p.dept_id, p.program_name, d.dept_name
+      FROM tbl_programs p
+      JOIN tbl_departments d ON p.dept_id = d.dept_id
+      ORDER BY d.dept_name, p.program_name
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching programs:', err);
+    res.status(500).json({ error: 'Failed to fetch programs' });
+  }
+});
+
+app.post('/api/programs', async (req, res) => {
+  try {
+    const { program_name, dept_id, head_id } = req.body;
+    if (!program_name || !dept_id) return res.status(400).json({ error: 'Missing required fields' });
+    const [result] = await pool.query('INSERT INTO tbl_programs (program_name, dept_id, head_id) VALUES (?, ?, ?)', [program_name, dept_id, head_id || null]);
+    res.status(201).json({ program_id: result.insertId, program_name, dept_id, head_id: head_id || null });
+  } catch (err) {
+    console.error('Error creating program:', err);
+    res.status(500).json({ error: 'Failed to create program' });
+  }
+});
+
+// Sections
+app.get('/api/sections', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT sec.section_id, sec.program_id, sec.section_name, p.program_name
+      FROM tbl_sections sec
+      JOIN tbl_programs p ON sec.program_id = p.program_id
+      ORDER BY p.program_name, sec.section_name
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching sections:', err);
+    res.status(500).json({ error: 'Failed to fetch sections' });
+  }
+});
+
+app.post('/api/sections', async (req, res) => {
+  try {
+    const { program_id, section_name } = req.body;
+    if (!program_id || !section_name) return res.status(400).json({ error: 'Missing required fields' });
+    const [result] = await pool.query('INSERT INTO tbl_sections (program_id, section_name) VALUES (?, ?)', [program_id, section_name]);
+    res.status(201).json({ section_id: result.insertId, program_id, section_name });
+  } catch (err) {
+    console.error('Error creating section:', err);
+    res.status(500).json({ error: 'Failed to create section' });
+  }
+});
+
+// Semesters
+app.get('/api/semesters', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT semester_id, session_id, term, DATE_FORMAT(start_date, "%Y-%m-%d") AS start_date, DATE_FORMAT(end_date, "%Y-%m-%d") AS end_date FROM tbl_semesters ORDER BY start_date DESC');
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching semesters:', err);
+    res.status(500).json({ error: 'Failed to fetch semesters' });
+  }
+});
+
+app.post('/api/semesters', async (req, res) => {
+  try {
+    const { session_id, term, start_date, end_date } = req.body;
+    if (!term || !start_date || !end_date) return res.status(400).json({ error: 'Missing required fields' });
+    const [result] = await pool.query('INSERT INTO tbl_semesters (session_id, term, start_date, end_date) VALUES (?, ?, ?, ?)', [session_id || null, term, start_date, end_date]);
+    res.status(201).json({ semester_id: result.insertId, session_id: session_id || null, term, start_date, end_date });
+  } catch (err) {
+    console.error('Error creating semester:', err);
+    res.status(500).json({ error: 'Failed to create semester' });
+  }
+});
+
+// Subjects
+app.get('/api/subjects', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT subject_id, program_id, subject_code, subject_name FROM tbl_subject ORDER BY subject_code');
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching subjects:', err);
+    res.status(500).json({ error: 'Failed to fetch subjects' });
+  }
+});
+
+app.post('/api/subjects', async (req, res) => {
+  try {
+    const { program_id, subject_code, subject_name } = req.body;
+    if (!program_id || !subject_code || !subject_name) return res.status(400).json({ error: 'Missing required fields' });
+    const [result] = await pool.query('INSERT INTO tbl_subject (program_id, subject_code, subject_name) VALUES (?, ?, ?)', [program_id, subject_code, subject_name]);
+    res.status(201).json({ subject_id: result.insertId, program_id, subject_code, subject_name });
+  } catch (err) {
+    console.error('Error creating subject:', err);
+    res.status(500).json({ error: 'Failed to create subject' });
+  }
+});
+
+// Subject Offerings
+app.get('/api/subject-offerings', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT so.offering_id, so.semester_id, so.section_id, so.subject_id, so.user_id,
+             s.subject_code, s.subject_name, sec.section_name, sem.term
+      FROM tbl_subject_offerings so
+      JOIN tbl_subject s ON so.subject_id = s.subject_id
+      JOIN tbl_sections sec ON so.section_id = sec.section_id
+      JOIN tbl_semesters sem ON so.semester_id = sem.semester_id
+      ORDER BY sem.start_date DESC, s.subject_code
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching subject offerings:', err);
+    res.status(500).json({ error: 'Failed to fetch subject offerings' });
+  }
+});
+
+app.post('/api/subject-offerings', async (req, res) => {
+  try {
+    const { semester_id, section_id, subject_id, user_id } = req.body;
+    if (!semester_id || !section_id || !subject_id) return res.status(400).json({ error: 'Missing required fields' });
+    const [result] = await pool.query('INSERT INTO tbl_subject_offerings (semester_id, section_id, subject_id, user_id) VALUES (?, ?, ?, ?)', [semester_id, section_id, subject_id, user_id || null]);
+    res.status(201).json({ offering_id: result.insertId, semester_id, section_id, subject_id, user_id: user_id || null });
+  } catch (err) {
+    console.error('Error creating subject offering:', err);
+    res.status(500).json({ error: 'Failed to create subject offering' });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
 const PORT = 3000;
 app.listen(PORT, () => {
   console.log(`API server running on http://localhost:${PORT}`);
