@@ -1,5 +1,5 @@
 // src/pages/user/Index.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 
 import Modal from "../../components/Modal.jsx";
@@ -23,6 +23,46 @@ const API_BASE = "http://localhost:3000";
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Small kebab (three-dots) menu used in the Actions column
+  function KebabMenu({ onEdit, onToggle, onArchive }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+      const onDocClick = (e) => {
+        if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      };
+      document.addEventListener('click', onDocClick);
+      return () => document.removeEventListener('click', onDocClick);
+    }, []);
+
+    return (
+      <div ref={ref} className="position-relative d-inline-block">
+        <button
+          type="button"
+          className="btn btn-light btn-sm"
+          onClick={() => setOpen((s) => !s)}
+          aria-haspopup="true"
+          aria-expanded={open}
+          style={{ width: 36, height: 36, padding: 0, borderRadius: 6 }}
+        >
+          {/* vertical ellipsis */}
+          <span style={{ fontSize: 18, lineHeight: '36px' }}>⋮</span>
+        </button>
+
+        {open && (
+          <div className="card" style={{ position: 'absolute', right: 0, top: '110%', zIndex: 250 }}>
+            <div className="list-group list-group-flush">
+              <button type="button" className="list-group-item list-group-item-action" onClick={() => { setOpen(false); onEdit(); }}>Edit</button>
+              <button type="button" className="list-group-item list-group-item-action" onClick={() => { setOpen(false); onToggle(); }}>Toggle</button>
+              <button type="button" className="list-group-item list-group-item-action text-danger" onClick={() => { setOpen(false); onArchive(); }}>Archive</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // Columns for Table
   const columns = [
@@ -81,29 +121,7 @@ const API_BASE = "http://localhost:3000";
       key: "actions",
       label: "Actions",
       render: (u) => (
-        <div className="d-flex gap-1">
-          <button
-            type="button"
-            className="btn btn-success btn-sm"
-            onClick={() => handleEdit(u)}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            className="btn btn-success btn-sm"
-            onClick={() => handleToggleActive(u)}
-          >
-            Toggle
-          </button>
-          <button
-            type="button"
-            className="btn btn-outline-success btn-sm"
-            onClick={() => handleArchive(u)}
-          >
-            Archive
-          </button>
-        </div>
+        <KebabMenu onEdit={() => handleEdit(u)} onToggle={() => handleToggleActive(u)} onArchive={() => handleArchive(u)} />
       ),
     },
   ];
