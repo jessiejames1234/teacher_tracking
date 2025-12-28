@@ -14,6 +14,7 @@ import SectionManagement from "./pages/Section/Index.jsx";
 import SemesterManagement from "./pages/Semester/Index.jsx";
 import SubjectManagement from "./pages/Subject/Index.jsx";
 import SubjectOfferingManagement from "./pages/SubjectOffering/Index.jsx";
+import Dashboard from "./pages/Dashboard/Index.jsx";
 
 import RoleCheck from "./Viewpoint/rolecheck.jsx";
 
@@ -26,6 +27,7 @@ function App() {
 
         {/* Protected routes with layout + nav */}
         <Route element={<RoleCheck />}>
+          <Route path="/dashboard" element={<Dashboard />} />
           {/* Default after login could be /users */}
           <Route path="/" element={<UserManagement />} />
           <Route path="/users" element={<UserManagement />} />

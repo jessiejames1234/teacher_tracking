@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import Modal from "../../components/Modal.jsx";
 import Table from "../../components/Table.jsx";
 
-const API_BASE = "http://localhost:3000";
+// Use Vite environment variable if provided, otherwise default to the current host:3000
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) || `http://${window.location.hostname}:3000`;
 
 export default function SubjectOfferingManagement(){
   const [offerings,setOfferings]=useState([]);
@@ -13,18 +14,63 @@ export default function SubjectOfferingManagement(){
   const [teachers,setTeachers]=useState([]);
   const [showModal,setShowModal]=useState(false);
   const [loading,setLoading]=useState(false);
-  const [error,setError]='';
+  const [error,setError]=useState('');
 
   const [form,setForm]=useState({ semester_id:'', section_id:'', subject_id:'', user_id:'' });
 
   useEffect(()=>{ loadAll(); }, []);
   const loadAll = async ()=>{ try{ setLoading(true); const [oRes, semRes, secRes, subjRes, tRes] = await Promise.all([fetch(`${API_BASE}/api/subject-offerings`), fetch(`${API_BASE}/api/semesters`), fetch(`${API_BASE}/api/sections`), fetch(`${API_BASE}/api/subjects`), fetch(`${API_BASE}/api/teachers`)]); const oData=await oRes.json(); const semData=await semRes.json(); const secData=await secRes.json(); const subjData=await subjRes.json(); const tData=await tRes.json(); setOfferings(Array.isArray(oData)?oData:[]); setSemesters(Array.isArray(semData)?semData:[]); setSections(Array.isArray(secData)?secData:[]); setSubjects(Array.isArray(subjData)?subjData:[]); setTeachers(Array.isArray(tData)?tData:[]);}catch(err){console.error(err); setError('Failed to load offerings');}finally{setLoading(false);} };
 
-  const openModal = ()=>{ setForm({ semester_id: semesters[0]?.semester_id || '', section_id: sections[0]?.section_id || '', subject_id: subjects[0]?.subject_id || '', user_id: '' }); setError(''); setShowModal(true); };
+  const openModal = ()=>{
+    // ensure lookups are present
+    if (!semesters.length || !sections.length || !subjects.length) {
+      setError('Please wait until semesters, sections and subjects are loaded.');
+      return;
+    }
+    setForm({ semester_id: semesters[0]?.semester_id || '', section_id: sections[0]?.section_id || '', subject_id: subjects[0]?.subject_id || '', user_id: '' });
+    setError('');
+    setShowModal(true);
+  };
   const closeModal = ()=> setShowModal(false);
   const handleChange = (e)=>{ const {name,value}=e.target; setForm(p=>({...p,[name]:value})); };
 
-  const handleSubmit = async (e)=>{ e.preventDefault(); setLoading(true); setError(''); try{ const res = await fetch(`${API_BASE}/api/subject-offerings`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(form)}); const data=await res.json(); if(!res.ok) setError(data.error||'Failed to create offering'); else { await loadAll(); closeModal(); } }catch(err){console.error(err); setError('Network error'); }finally{setLoading(false);} };
+  const handleSubmit = async (e)=>{
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try{
+      // prepare numeric payload
+      const payload = {
+        semester_id: Number(form.semester_id) || null,
+        section_id: Number(form.section_id) || null,
+        subject_id: Number(form.subject_id) || null,
+        user_id: form.user_id ? Number(form.user_id) : null,
+      };
+
+      const res = await fetch(`${API_BASE}/api/subject-offerings`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+
+      const text = await res.text();
+      // Safely parse JSON; if parsing fails return raw text container
+      const parseJsonSafe = (s) => {
+        try { return JSON.parse(s); } catch { return { raw: s }; }
+      };
+      const data = parseJsonSafe(text);
+
+      if (!res.ok) {
+        console.error('Create offering failed', res.status, data);
+        setError((data && data.error) || `Failed to create offering (status ${res.status})`);
+      } else {
+        await loadAll();
+        closeModal();
+      }
+    }catch(err){
+      console.error('Network error creating offering:', err);
+      setError('Network error');
+    }finally{setLoading(false);} };
 
   const columns = [ { key:'offering_id', label:'ID' }, { key:'term', label:'Term' }, { key:'section_name', label:'Section' }, { key:'subject_code', label:'Subject Code' }, { key:'subject_name', label:'Subject' }, { key:'user_id', label:'Teacher ID' } ];
 
@@ -32,7 +78,13 @@ export default function SubjectOfferingManagement(){
     <div className="container py-3">
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2 className="mb-0">Subject Offerings</h2>
-        <button className="btn btn-success" onClick={openModal}>Add Offering</button>
+        <button
+          className="btn btn-success"
+          onClick={openModal}
+          disabled={semesters.length === 0 || sections.length === 0 || subjects.length === 0}
+        >
+          {semesters.length === 0 || sections.length === 0 || subjects.length === 0 ? 'Loading...' : 'Add Offering'}
+        </button>
       </div>
 
       {error && <div className="alert alert-danger py-2">{error}</div>}

@@ -5,6 +5,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';   // ✅ Required!
 import pool from './db.js';
 import locationsRouter from './locationsRoutes.js'; // ⬅️ NEW
+import dashboardRouter from './dashboardRoutes.js';
 import cron from 'node-cron';
 
 
@@ -18,7 +19,7 @@ function deg2rad(deg) {
 function getDistanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000; // Earth radius in meters
   const dLat = deg2rad(lat2 - lat1);
-  const dLon = deg2rad(lon2 - lon1);
+  const dLon = deg2rad(lon1 - lon2);
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(deg2rad(lat1)) *
@@ -30,6 +31,20 @@ function getDistanceMeters(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Helper: ensure we have 'YYYY-MM-DD' string from a DB date (which may be a JS Date or string)
+function toDateYMD(d) {
+  if (!d) return null;
+  if (typeof d === 'string') return d;
+  if (d instanceof Date && !isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  // Last-resort: try to coerce
+  try {
+    const dt = new Date(d);
+    if (!isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+  } catch (e) {
+    // fall-through
+  }
+  return null;
+}
 
 const app = express();
 
@@ -38,6 +53,8 @@ app.use(express.json());
 
 // mount location-related APIs under /api
 app.use('/api', locationsRouter);
+// mount dashboard APIs
+app.use('/api', dashboardRouter);
 
 
 
@@ -557,318 +574,269 @@ app.post('/api/attendance/generate-week', async (req, res) => {
 
 
 // POST /api/attendance/check-in
-// Body: { schedule_id, user_id, date: 'YYYY-MM-DD', latitude, longitude }
+// Body: { schedule_id, user_id, date: 'YYYY-MM-DD', latitude, longitude, accuracy }
 app.post('/api/attendance/check-in', async (req, res) => {
   try {
-    const { schedule_id, user_id, date, latitude, longitude } = req.body;
+    const { schedule_id, user_id, date, latitude, longitude, accuracy } = req.body;
+    const ACCURACY_THRESHOLD_METERS = 30; // server-side threshold
 
     if (!schedule_id || !user_id || !date) {
-      return res
-        .status(400)
-        .json({ error: 'schedule_id, user_id, and date are required' });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // 1) Load attendance row + schedule + room
     const [rows] = await pool.query(
-      `
-      SELECT
-        ar.attendance_id,
-        ar.date,
-        cs.start_time,
-        cs.end_time,
-        r.latitude AS room_lat,
-        r.longitude AS room_lon,
-        r.radius AS room_radius
-      FROM tbl_attendance_records ar
-      JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
-      JOIN tbl_rooms r              ON ar.room_id = r.room_id
-      WHERE ar.schedule_id = ?
-        AND ar.user_id = ?
-        AND ar.date = ?
-      LIMIT 1
-    `,
+      `SELECT ar.attendance_id, ar.date, cs.start_time, cs.end_time, r.latitude AS room_lat, r.longitude AS room_lon, r.radius AS room_radius, ar.flag_in_id, ar.flag_check_id, ar.flag_out_id
+       FROM tbl_attendance_records ar
+       JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
+       JOIN tbl_rooms r            ON ar.room_id = r.room_id
+       WHERE ar.schedule_id = ? AND ar.user_id = ? AND ar.date = ? LIMIT 1`,
       [schedule_id, user_id, date]
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({
-        error:
-          'No attendance row found for this schedule/date (run attendance generator first).',
-      });
-    }
-
+    if (rows.length === 0) return res.status(404).json({ error: 'Attendance record not found' });
     const row = rows[0];
 
-    // 2) GPS distance check (user must be within room radius)
-    if (latitude != null && longitude != null) {
-      const dist = getDistanceMeters(
-        Number(latitude),
-        Number(longitude),
-        Number(row.room_lat),
-        Number(row.room_lon)
-      );
+    // Normalize date value (DB driver may return Date object)
+    const dateStr = toDateYMD(row.date) || toDateYMD(date);
+    if (!dateStr) return res.status(400).json({ error: 'Invalid attendance date' });
 
-      if (dist > row.room_radius) {
-        return res.status(400).json({
-          error: `You are outside the allowed classroom radius (${Math.round(
-            row.room_radius
-          )}m). Current distance ≈ ${Math.round(dist)}m.`,
-        });
-      }
-    }
+    // Build class start using local components to avoid timezone issues
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const [sh, sm, ss] = (row.start_time || '00:00:00').split(':').map(Number);
+    const classStart = new Date(y, m - 1, d, sh, sm, ss);
+    if (isNaN(classStart.getTime())) return res.status(400).json({ error: 'Invalid class start time/date' });
 
-    // 3) Time-based flag_in logic
+    // Enforce check-in window: start -15min -> start +15min
+    const checkInStart = new Date(classStart.getTime() - 15 * 60000);
+    const checkInEnd = new Date(classStart.getTime() + 15 * 60000);
     const now = new Date();
-
-    // Build "class start" Date using provided date + DB time
-    const classStart = new Date(`${row.date}T${row.start_time}`); // server local time
-    const diffMinutes = (now.getTime() - classStart.getTime()) / (1000 * 60);
-
-    // 15-minute rule:
-    // - > 15 minutes late → flag_in_id = 5 (late)
-    // - <= 15 minutes after start AND not earlier than -15 minutes → present
-    // - < -15 minutes → too early, do not allow check-in
-    if (diffMinutes < -15) {
-      return res.status(400).json({
-        error: 'Check-in window is not yet open (more than 15 minutes early).',
-      });
+    if (now < checkInStart) {
+      return res.status(400).json({ error: 'Too early for check-in', allow_at: checkInStart.toISOString() });
+    }
+    if (now > checkInEnd) {
+      return res.status(400).json({ error: 'Check-in window closed' });
     }
 
-    let newFlagIn = 2; // present
-    if (diffMinutes > 15) {
-      newFlagIn = 5; // late
+    // Distance check
+    if (latitude != null && longitude != null && row.room_lat != null && row.room_lon != null && row.room_radius != null) {
+      const dist = getDistanceMeters(latitude, longitude, row.room_lat, row.room_lon);
+      if (dist > Number(row.room_radius)) return res.status(400).json({ error: `Device is outside room radius (${Math.round(dist)}m)` });
     }
 
-    const [result] = await pool.query(
-      `
-        UPDATE tbl_attendance_records
-        SET time_in = NOW(),
-            latitude_in = ?,
-            longitude_in = ?,
-            flag_in_id = ?
-        WHERE attendance_id = ?
-      `,
-      [latitude || null, longitude || null, newFlagIn, row.attendance_id]
+    // Accuracy check
+    if (accuracy != null && accuracy > ACCURACY_THRESHOLD_METERS) return res.status(400).json({ error: `GPS accuracy ${Math.round(accuracy)}m is too low` });
+
+    // Accept check-in and mark Present (2)
+    await pool.query(
+      `UPDATE tbl_attendance_records SET time_in = NOW(), latitude_in = ?, longitude_in = ?, flag_in_id = 2 WHERE attendance_id = ?`,
+      [latitude || null, longitude || null, row.attendance_id]
     );
 
-    if (result.affectedRows === 0) {
-      return res
-        .status(404)
-        .json({ error: 'Failed to update attendance record for check-in.' });
-    }
+    const [updated] = await pool.query(
+      `SELECT ar.*, u.first_name, u.last_name, cs.start_time, cs.end_time, r.room_name, s.subject_code, s.subject_name, sec.section_name
+       FROM tbl_attendance_records ar
+       JOIN tbl_users u ON ar.user_id = u.user_id
+       JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
+       JOIN tbl_rooms r ON ar.room_id = r.room_id
+       JOIN tbl_subject_offerings so ON cs.offering_id = so.offering_id
+       JOIN tbl_subject s ON so.subject_id = s.subject_id
+       JOIN tbl_sections sec ON so.section_id = sec.section_id
+       WHERE ar.attendance_id = ? LIMIT 1`,
+      [row.attendance_id]
+    );
 
-    res.json({
-      ok: true,
-      message:
-        newFlagIn === 2
-          ? 'Check-in recorded as PRESENT.'
-          : 'Check-in recorded as LATE.',
-      flag_in_id: newFlagIn,
-    });
+    return res.json({ ok: true, attendance: updated[0] });
   } catch (err) {
-    console.error('Error on check-in:', err);
-    res.status(500).json({ error: 'Failed to record check-in' });
+    console.error('Check-in error:', err && err.stack ? err.stack : err);
+    return res.status(500).json({ error: 'Server error during check-in', details: err && err.message ? err.message : String(err) });
   }
 });
-
-
-
 
 
 // POST /api/attendance/mid-check
-// Body: { schedule_id, user_id, date, latitude, longitude }
 app.post('/api/attendance/mid-check', async (req, res) => {
   try {
-    const { schedule_id, user_id, date, latitude, longitude } = req.body;
+    const { schedule_id, user_id, date, latitude, longitude, accuracy } = req.body;
+    const ACCURACY_THRESHOLD_METERS = 30;
 
-    if (!schedule_id || !user_id || !date) {
-      return res
-        .status(400)
-        .json({ error: 'schedule_id, user_id, and date are required' });
-    }
+    console.log('[MID-CHECK] payload:', { schedule_id, user_id, date, latitude, longitude, accuracy });
+
+    if (!schedule_id || !user_id || !date) return res.status(400).json({ error: 'Missing required fields' });
 
     const [rows] = await pool.query(
-      `
-      SELECT
-        ar.attendance_id,
-        ar.date,
-        cs.start_time,
-        cs.end_time,
-        r.latitude AS room_lat,
-        r.longitude AS room_lon,
-        r.radius AS room_radius
-      FROM tbl_attendance_records ar
-      JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
-      JOIN tbl_rooms r              ON ar.room_id = r.room_id
-      WHERE ar.schedule_id = ?
-        AND ar.user_id = ?
-        AND ar.date = ?
-      LIMIT 1
-    `,
+      `SELECT ar.attendance_id, ar.date, cs.start_time, cs.end_time, r.latitude AS room_lat, r.longitude AS room_lon, r.radius AS room_radius, ar.flag_in_id, ar.flag_check_id
+       FROM tbl_attendance_records ar
+       JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
+       JOIN tbl_rooms r ON ar.room_id = r.room_id
+       WHERE ar.schedule_id = ? AND ar.user_id = ? AND ar.date = ? LIMIT 1`,
       [schedule_id, user_id, date]
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({
-        error:
-          'No attendance row found for this schedule/date (run attendance generator first).',
-      });
-    }
-
+    if (rows.length === 0) return res.status(404).json({ error: 'Attendance record not found' });
     const row = rows[0];
 
-    // Distance from room
-    let newFlagCheck = 3; // default: absent
-    if (latitude != null && longitude != null) {
-      const dist = getDistanceMeters(
-        Number(latitude),
-        Number(longitude),
-        Number(row.room_lat),
-        Number(row.room_lon)
-      );
+    console.log('[MID-CHECK] db row:', row);
 
-      if (dist > row.room_radius) {
-        newFlagCheck = 3; // absent
-      } else {
-        newFlagCheck = 2; // present
-      }
+    const dateStr = toDateYMD(row.date) || toDateYMD(date);
+    if (!dateStr) return res.status(400).json({ error: 'Invalid attendance date' });
+
+    // Build class start using local components
+    const [y2, m2, d2] = dateStr.split('-').map(Number);
+    const [sh2, sm2, ss2] = (row.start_time || '00:00:00').split(':').map(Number);
+    const classStart2 = new Date(y2, m2 - 1, d2, sh2, sm2, ss2);
+    if (isNaN(classStart2.getTime())) return res.status(400).json({ error: 'Invalid class start time/date' });
+
+    // Mid window = start +15min -> start +45min
+    const midStart = new Date(classStart2.getTime() + 15 * 60000);
+    const midEnd = new Date(classStart2.getTime() + 45 * 60000);
+
+    // Reject early mid-checks rather than accept and mark Late
+    const now = new Date();
+    if (now < midStart) {
+      return res.status(400).json({ error: 'Too early for mid-check', allow_at: midStart.toISOString() });
     }
 
-    const [result] = await pool.query(
-      `
-        UPDATE tbl_attendance_records
-        SET time_check = NOW(),
-            latitude_check = ?,
-            longitude_check = ?,
-            flag_check_id = ?
-        WHERE attendance_id = ?
-      `,
-      [latitude || null, longitude || null, newFlagCheck, row.attendance_id]
+    const flagCheck = now >= midStart && now <= midEnd ? 2 : 5; // Present or Late
+
+    // If flag_in is still NA and its window passed, mark it Late
+    const flagInWindowEnd = new Date(classStart2.getTime() + 15 * 60000);
+    if (row.flag_in_id === 1 && now > flagInWindowEnd) {
+      await pool.query(`UPDATE tbl_attendance_records SET flag_in_id = 5 WHERE attendance_id = ?`, [row.attendance_id]);
+    }
+
+    await pool.query(`UPDATE tbl_attendance_records SET time_check = NOW(), latitude_check = ?, longitude_check = ?, flag_check_id = ? WHERE attendance_id = ?`, [latitude || null, longitude || null, flagCheck, row.attendance_id]);
+
+    const [updated] = await pool.query(
+      `SELECT ar.*, u.first_name, u.last_name, cs.start_time, cs.end_time, r.room_name, s.subject_code, s.subject_name, sec.section_name
+       FROM tbl_attendance_records ar
+       JOIN tbl_users u ON ar.user_id = u.user_id
+       JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
+       JOIN tbl_rooms r ON ar.room_id = r.room_id
+       JOIN tbl_subject_offerings so ON cs.offering_id = so.offering_id
+       JOIN tbl_subject s ON so.subject_id = s.subject_id
+       JOIN tbl_sections sec ON so.section_id = sec.section_id
+       WHERE ar.attendance_id = ? LIMIT 1`,
+      [row.attendance_id]
     );
 
-    if (result.affectedRows === 0) {
-      return res
-        .status(404)
-        .json({ error: 'Failed to update attendance record for mid-check.' });
-    }
-
-    res.json({
-      ok: true,
-      message:
-        newFlagCheck === 2
-          ? 'Mid-class check recorded as PRESENT.'
-          : 'Mid-class check recorded as ABSENT (outside room radius).',
-      flag_check_id: newFlagCheck,
-    });
+    return res.json({ ok: true, attendance: updated[0] });
   } catch (err) {
-    console.error('Error on mid-check:', err);
-    res.status(500).json({ error: 'Failed to record mid-check' });
+    console.error('Mid-check error:', err && err.stack ? err.stack : err);
+    // Return error details during development to help debugging
+    return res.status(500).json({ error: 'Server error during mid-check', details: err && err.message ? err.message : String(err) });
   }
 });
 
 
-
 // POST /api/attendance/check-out
-// Body: { schedule_id, user_id, date, latitude, longitude }
 app.post('/api/attendance/check-out', async (req, res) => {
   try {
-    const { schedule_id, user_id, date, latitude, longitude } = req.body;
+    const { schedule_id, user_id, date, latitude, longitude, accuracy } = req.body;
+    const ACCURACY_THRESHOLD_METERS = 30;
 
-    if (!schedule_id || !user_id || !date) {
-      return res
-        .status(400)
-        .json({ error: 'schedule_id, user_id, and date are required' });
-    }
+    if (!schedule_id || !user_id || !date) return res.status(400).json({ error: 'Missing required fields' });
 
     const [rows] = await pool.query(
-      `
-      SELECT
-        ar.attendance_id,
-        ar.date,
-        ar.time_in,
-        ar.time_check,
-        ar.flag_in_id,
-        ar.flag_check_id,
-        cs.start_time,
-        cs.end_time,
-        r.latitude AS room_lat,
-        r.longitude AS room_lon,
-        r.radius AS room_radius
-      FROM tbl_attendance_records ar
-      JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
-      JOIN tbl_rooms r              ON ar.room_id = r.room_id
-      WHERE ar.schedule_id = ?
-        AND ar.user_id = ?
-        AND ar.date = ?
-      LIMIT 1
-    `,
+      `SELECT ar.attendance_id, ar.date, cs.start_time, cs.end_time, r.latitude AS room_lat, r.longitude AS room_lon, r.radius AS room_radius, ar.flag_in_id, ar.flag_check_id, ar.flag_out_id
+       FROM tbl_attendance_records ar
+       JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
+       JOIN tbl_rooms r ON ar.room_id = r.room_id
+       WHERE ar.schedule_id = ? AND ar.user_id = ? AND ar.date = ? LIMIT 1`,
       [schedule_id, user_id, date]
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({
-        error:
-          'No attendance row found for this schedule/date (run attendance generator first).',
-      });
-    }
-
+    if (rows.length === 0) return res.status(404).json({ error: 'Attendance record not found' });
     const row = rows[0];
 
-    // If teacher never attended at all (flag_in still NA and no times),
-    // treat as ABSENT on flag_out.
-    const neverAttended =
-      row.flag_in_id === 1 &&
-      !row.time_in &&
-      !row.time_check &&
-      row.flag_check_id === 1;
+    const dateStr = toDateYMD(row.date) || toDateYMD(date);
+    if (!dateStr) return res.status(400).json({ error: 'Invalid attendance date' });
 
-    let newFlagOut = 3; // absent by default
+    // Build class start/end using local components
+    const [y3, m3, d3] = dateStr.split('-').map(Number);
+    const [sh3, sm3, ss3] = (row.start_time || '00:00:00').split(':').map(Number);
+    const [eh3, em3, es3] = (row.end_time || '00:00:00').split(':').map(Number);
+    const classStart3 = new Date(y3, m3 - 1, d3, sh3, sm3, ss3);
+    const classEnd3 = new Date(y3, m3 - 1, d3, eh3, em3, es3);
+    if (isNaN(classStart3.getTime()) || isNaN(classEnd3.getTime())) return res.status(400).json({ error: 'Invalid class start/end time' });
 
-    if (!neverAttended && latitude != null && longitude != null) {
-      const dist = getDistanceMeters(
-        Number(latitude),
-        Number(longitude),
-        Number(row.room_lat),
-        Number(row.room_lon)
-      );
+    const now = new Date();
 
-      if (dist <= row.room_radius) {
-        newFlagOut = 2; // present at end of class
-      } else {
-        newFlagOut = 3; // outside room radius → absent at end
-      }
+    // Out window: end -15min -> end
+    const outStart = new Date(classEnd3.getTime() - 15 * 60000);
+
+    // Reject early check-out requests
+    if (now < outStart) {
+      return res.status(400).json({ error: 'Too early for check-out', allow_at: outStart.toISOString() });
     }
 
-    const [result] = await pool.query(
-      `
-        UPDATE tbl_attendance_records
-        SET time_out = NOW(),
-            latitude_out = ?,
-            longitude_out = ?,
-            flag_out_id = ?
-        WHERE attendance_id = ?
-      `,
-      [latitude || null, longitude || null, newFlagOut, row.attendance_id]
+    const flagOut = now >= outStart && now <= classEnd3 ? 2 : 5; // Present or Late
+
+    await pool.query(`UPDATE tbl_attendance_records SET time_out = NOW(), latitude_out = ?, longitude_out = ?, flag_out_id = ? WHERE attendance_id = ?`, [latitude || null, longitude || null, flagOut, row.attendance_id]);
+
+    // If previous flags (in/check) are NA and their windows passed, mark them Late
+    const flagInWindowEnd = new Date(classStart3.getTime() + 15 * 60000);
+    const flagCheckWindowEnd = new Date(classStart3.getTime() + 45 * 60000);
+
+    const updates = [];
+    if (row.flag_in_id === 1 && now > flagInWindowEnd) updates.push('flag_in_id = 5');
+    if (row.flag_check_id === 1 && now > flagCheckWindowEnd) updates.push('flag_check_id = 5');
+
+    if (updates.length) {
+      const sql = `UPDATE tbl_attendance_records SET ${updates.join(', ')} WHERE attendance_id = ?`;
+      await pool.query(sql, [row.attendance_id]);
+    }
+
+    const [updated] = await pool.query(
+      `SELECT ar.*, u.first_name, u.last_name, cs.start_time, cs.end_time, r.room_name, s.subject_code, s.subject_name, sec.section_name
+       FROM tbl_attendance_records ar
+       JOIN tbl_users u ON ar.user_id = u.user_id
+       JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
+       JOIN tbl_rooms r ON ar.room_id = r.room_id
+       JOIN tbl_subject_offerings so ON cs.offering_id = so.offering_id
+       JOIN tbl_subject s ON so.subject_id = s.subject_id
+       JOIN tbl_sections sec ON so.section_id = sec.section_id
+       WHERE ar.attendance_id = ? LIMIT 1`,
+      [row.attendance_id]
     );
 
-    if (result.affectedRows === 0) {
-      return res
-        .status(404)
-        .json({ error: 'Failed to update attendance record for check-out.' });
-    }
-
-    res.json({
-      ok: true,
-      message:
-        newFlagOut === 2
-          ? 'Check-out recorded as PRESENT at end of class.'
-          : 'Teacher marked ABSENT at end of class.',
-      flag_out_id: newFlagOut,
-      neverAttended,
-    });
+    return res.json({ ok: true, attendance: updated[0] });
   } catch (err) {
-    console.error('Error on check-out:', err);
-    res.status(500).json({ error: 'Failed to record check-out' });
+    console.error('Check-out error:', err);
+    return res.status(500).json({ error: 'Server error during check-out' });
+  }
+});
+
+
+// CRON: auto-mark ABSENT for any NA flags after class ends (runs every minute)
+cron.schedule('*/1 * * * *', async () => {
+  try {
+    console.log('[CRON] Auto-absent check started...');
+
+    const [rows] = await pool.query(`
+      SELECT ar.attendance_id
+      FROM tbl_attendance_records ar
+      JOIN tbl_class_schedules cs ON ar.schedule_id = cs.schedule_id
+      WHERE (ar.flag_in_id = 1 OR ar.flag_check_id = 1 OR ar.flag_out_id = 1)
+        AND TIMESTAMP(ar.date, cs.end_time) < DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+    `);
+
+    if (!rows.length) return;
+
+    const ids = rows.map((r) => r.attendance_id);
+
+    await pool.query(`
+      UPDATE tbl_attendance_records
+      SET
+        flag_in_id = CASE WHEN flag_in_id = 1 THEN 3 ELSE flag_in_id END,
+        flag_check_id = CASE WHEN flag_check_id = 1 THEN 3 ELSE flag_check_id END,
+        flag_out_id = CASE WHEN flag_out_id = 1 THEN 3 ELSE flag_out_id END,
+        time_out = CASE WHEN flag_out_id = 1 AND time_out IS NULL THEN NOW() ELSE time_out END
+      WHERE attendance_id IN (?)
+    `, [ids]);
+
+    console.log(`[CRON] Auto-absent: updated ${ids.length} record(s).`);
+  } catch (err) {
+    console.error('[CRON] Error in auto-absent check:', err);
   }
 });
 
@@ -1054,9 +1022,10 @@ app.post('/api/subject-offerings', async (req, res) => {
 
 
 
-const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`API server running on http://localhost:${PORT}`);
+const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0';
+app.listen(PORT, HOST, () => {
+  console.log(`API server running on http://${HOST}:${PORT} (listening on all interfaces)`);
 });
 
 // CRON: run every Monday at 03:00 server time

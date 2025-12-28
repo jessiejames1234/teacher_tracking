@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Dec 13, 2025 at 02:14 PM
+-- Generation Time: Dec 28, 2025 at 03:42 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -94,10 +94,26 @@ INSERT INTO `tbl_attendance_records` (`attendance_id`, `user_id`, `schedule_id`,
 (8, 6, 2, 1, '2025-12-12', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
 (9, 6, 3, 3, '2025-12-12', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
 (10, 6, 4, 2, '2025-12-12', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
-(11, 6, 1, 1, '2025-12-18', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1),
-(12, 6, 2, 1, '2025-12-19', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1),
-(13, 6, 3, 3, '2025-12-19', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1),
-(14, 6, 4, 2, '2025-12-19', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1);
+(11, 6, 1, 1, '2025-12-18', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(12, 6, 2, 1, '2025-12-19', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(13, 6, 3, 3, '2025-12-19', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(14, 6, 4, 2, '2025-12-19', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(15, 6, 1, 1, '2025-12-25', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(16, 6, 2, 1, '2025-12-26', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(17, 6, 3, 3, '2025-12-26', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(19, 6, 1, 1, '2026-01-01', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1),
+(20, 6, 5, 2, '2025-12-26', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(22, 6, 6, 4, '2025-12-26', '2025-12-26 16:38:11', 8.4700117, 124.6343779, 2, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(24, 6, 4, 2, '2025-12-26', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(25, 6, 2, 1, '2026-01-02', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1),
+(26, 6, 3, 3, '2026-01-02', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1),
+(27, 6, 4, 2, '2026-01-02', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1),
+(28, 6, 5, 2, '2026-01-02', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1),
+(29, 6, 6, 4, '2026-01-02', NULL, NULL, NULL, 1, NULL, NULL, NULL, 1, NULL, NULL, NULL, 1),
+(30, 6, 7, 3, '2025-12-28', '2025-12-28 21:28:22', 8.4699699, 124.6343702, 2, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(32, 6, 9, 3, '2025-12-28', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(34, 6, 8, 3, '2025-12-28', NULL, NULL, NULL, 3, NULL, NULL, NULL, 3, NULL, NULL, NULL, 3),
+(35, 6, 10, 3, '2025-12-28', '2025-12-28 22:41:54', 8.4699558, 124.6343653, 5, '2025-12-28 22:42:03', 8.4699572, 124.6343720, 5, '2025-12-28 22:42:05', 8.4699572, 124.6343720, 5);
 
 -- --------------------------------------------------------
 
@@ -142,7 +158,13 @@ INSERT INTO `tbl_class_schedules` (`schedule_id`, `room_id`, `offering_id`, `day
 (1, 1, 1, 'thursday', '21:11:00', '22:11:00'),
 (2, 1, 1, 'friday', '08:19:00', '09:59:00'),
 (3, 3, 1, 'friday', '08:27:00', '09:00:00'),
-(4, 2, 1, 'friday', '09:10:00', '09:11:00');
+(4, 2, 1, 'friday', '09:10:00', '09:11:00'),
+(5, 2, 1, 'friday', '21:25:00', '22:25:00'),
+(6, 4, 1, 'friday', '16:30:00', '17:30:00'),
+(7, 3, 1, 'sunday', '21:30:00', '22:30:00'),
+(8, 3, 1, 'sunday', '00:00:00', '00:00:00'),
+(9, 3, 1, 'sunday', '00:00:00', '00:00:00'),
+(10, 3, 1, 'sunday', '22:41:00', '23:41:00');
 
 -- --------------------------------------------------------
 
@@ -182,7 +204,8 @@ INSERT INTO `tbl_flag_types` (`flag_id`, `flag_name`) VALUES
 (1, 'NA'),
 (2, 'present'),
 (3, 'absent'),
-(4, 'excuse');
+(4, 'excuse'),
+(5, 'late');
 
 -- --------------------------------------------------------
 
@@ -352,7 +375,8 @@ CREATE TABLE `tbl_rooms` (
 INSERT INTO `tbl_rooms` (`room_id`, `building_id`, `floor_id`, `latitude`, `longitude`, `radius`, `room_name`) VALUES
 (1, 1, 1, 200.3000000, 200.3000000, 10, 'dsad'),
 (2, 2, 2, 231.0000000, 21.0000000, 10, 'dsa'),
-(3, 2, 2, 8.4699900, 124.6343800, 10, 'room idk');
+(3, 2, 2, 8.4699560, 124.6343800, 15, 'room idk'),
+(4, 2, 2, 8.4700150, 124.6343750, 2, 'room41');
 
 -- --------------------------------------------------------
 
@@ -777,7 +801,7 @@ ALTER TABLE `tbl_attendance_audit`
 -- AUTO_INCREMENT for table `tbl_attendance_records`
 --
 ALTER TABLE `tbl_attendance_records`
-  MODIFY `attendance_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=15;
+  MODIFY `attendance_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=36;
 
 --
 -- AUTO_INCREMENT for table `tbl_buildings`
@@ -789,7 +813,7 @@ ALTER TABLE `tbl_buildings`
 -- AUTO_INCREMENT for table `tbl_class_schedules`
 --
 ALTER TABLE `tbl_class_schedules`
-  MODIFY `schedule_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
+  MODIFY `schedule_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT for table `tbl_departments`
@@ -801,7 +825,7 @@ ALTER TABLE `tbl_departments`
 -- AUTO_INCREMENT for table `tbl_flag_types`
 --
 ALTER TABLE `tbl_flag_types`
-  MODIFY `flag_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
+  MODIFY `flag_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
 
 --
 -- AUTO_INCREMENT for table `tbl_floors`
@@ -861,7 +885,7 @@ ALTER TABLE `tbl_roles`
 -- AUTO_INCREMENT for table `tbl_rooms`
 --
 ALTER TABLE `tbl_rooms`
-  MODIFY `room_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+  MODIFY `room_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
 
 --
 -- AUTO_INCREMENT for table `tbl_sections`

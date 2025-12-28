@@ -177,24 +177,32 @@ export default function AttendanceManagement() {
     return `${h}:${m}${am}`;
   };
 
+// Flag labels (lowercase stored values) — display as capitalized words
 const FLAGS = {
-  1: "NA",
-  2: "present",
-  3: "absent",
-  4: "excuse",
-  5: "late",
+  1: 'NA',
+  2: 'present',
+  3: 'absent',
+  4: 'excuse',
+  5: 'late',
 };
 
-const renderTimeWithFlag = (time, flag) => {
-  if (!flag) return "";
+const capitalize = (s) => (typeof s === 'string' && s.length ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-  // Only show actual time when status is "present" and we HAVE a time.
-  if (flag === 2 && time) {
-    return formatTime(time);
+const renderTimeWithFlag = (time, flag) => {
+  // coerce flag to number in case it's a string
+  const fid = flag == null ? null : Number(flag);
+  if (!fid) return "";
+
+  const word = FLAGS[fid] || "";
+
+  // If present and we have a time, show time followed by the word without parentheses
+  if (fid === 2) {
+    if (time) return `${formatTime(time)} ${capitalize(word)}`;
+    return capitalize(word);
   }
 
-  // For NA, absent, excuse, late → always show the word
-  return FLAGS[flag] || "";
+  // For other flags show the capitalized word
+  return capitalize(word);
 };
 
 

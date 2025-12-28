@@ -6,6 +6,8 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 
 export default function RoleCheck() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // prevent flash: don't render protected UI until auth check completes
+  const [checking, setChecking] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -13,11 +15,22 @@ export default function RoleCheck() {
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
+      // no token -> redirect to login
       navigate("/login");
+      // keep checking=true so we don't render protected UI while redirecting
+      return;
     }
+
+    // token exists. If you need server validation, do it here and setChecking(false) after.
+    // For now we assume presence of token is enough for immediate rendering.
+    setChecking(false);
   }, [navigate]);
 
+  // Render guard: show a small loader while auth check runs (placed after hooks to preserve order)
+  // (This early-return is inserted later in the file before the main JSX return.)
+
   const navItems = [
+    { label: "Dashboard", path: "/dashboard" },
     { label: "User Management", path: "/users" },
     { label: "Class Schedules", path: "/class-schedules" },
     { label: "Departments", path: "/departments" },
@@ -216,6 +229,15 @@ export default function RoleCheck() {
     localStorage.removeItem("token");
     navigate("/login");
   };
+
+  // If we are still checking auth, do not render the protected UI (prevents flash)
+  if (checking) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+        <div style={{ textAlign: 'center', color: '#666' }}>Checking authentication...</div>
+      </div>
+    );
+  }
 
   return (
     <div style={layoutStyle}>
