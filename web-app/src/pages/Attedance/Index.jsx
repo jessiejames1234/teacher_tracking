@@ -90,11 +90,7 @@ export default function AttendanceManagement() {
       try {
         setLoading(true);
 
-        // generate this week's attendance
-        await fetch(`${API_BASE}/api/attendance/generate-week`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
+        // NOTE: generation moved to server-side cron/startup; do not trigger DB writes from the client here.
 
         // fetch teachers (inline to avoid dependency on external helper)
         try {
